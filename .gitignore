@@ -1,0 +1,11 @@
+*~
+/bin
+/lib
+/Testing
+CMakeCache.txt
+Makefile
+/CMakeFiles
+**/CMakeFiles
+*.cmake
+**/*.dir/
+tests/*_test
