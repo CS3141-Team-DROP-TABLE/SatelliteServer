@@ -204,8 +204,8 @@ struct list_node *ll_pq_insert(struct list *l, struct list_node *ln){
      }
        
      
-     if(mk == l->tail)
-       l->tail = mk;
+     if(ln->next == NULL)
+       l->tail = ln;
 
      
      l->size++;
