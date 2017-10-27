@@ -1,8 +1,8 @@
 link_directories(/usr/local/lib)
 
-set(LIBS ${LIBS} gnutls pthread linkedList)
+set(LIBS ${LIBS} gnutls pthread linkedList ping)
 
-add_executable(client ping.c client.c)
+add_executable(client client.c)
 target_link_libraries(client ${LIBS})
 
 

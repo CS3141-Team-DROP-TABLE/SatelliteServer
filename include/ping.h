@@ -23,7 +23,7 @@ struct ping_th_args{
   in_addr_t src;
   int sockfd;
 };
-    printf("Queue Size %d\n", queue->size);
+
 char *create_packet();
 void set_src(char *packet, in_addr_t src);
 void set_dst(char *packet, in_addr_t dst);

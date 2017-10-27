@@ -1,0 +1,4 @@
+[submodule "src/CServerLibraries"]
+	path = src/CServerLibraries
+	url = git@github.com:CS3141-Team-DROP-TABLE/CServerLibraries.git
+	branch = master
