@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -11,6 +12,7 @@
 #include <unistd.h>
 #include <pthread.h>
 
+#include <client.h>
 #include <ping.h>
 #include <linkedList.h>
 #include <serverConnect.h>
@@ -26,6 +28,8 @@ void *ping_loop(void *argsin){
 
   char *pkt = create_packet();
   set_src(pkt, ((struct ping_th_args*)argsin)->src);
+
+  set_sock_opt(sockfd);
   
   struct target *t;
   while(1){
