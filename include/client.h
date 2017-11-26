@@ -18,7 +18,10 @@
 #include <sys/time.h>
 
 struct target_profile{
+  in_addr_t adr;
   struct timeval lastping;
+  char unreachable;
+  char timeout;
   int pings_out;
 };
 
@@ -40,6 +43,7 @@ struct ping_th_args{
 
 struct ping_recv_th_args{
   struct connection *conn;
+  struct tree *targets;
   struct list *ping_queue;
   struct tree *sent_pings;
   int sockfd;

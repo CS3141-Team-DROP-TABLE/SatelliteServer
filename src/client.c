@@ -66,8 +66,6 @@ void *ping_loop(void *argsin){
       
       struct in_addr ia;
       ia.s_addr = *dst;
-      printf("sent: %s at %lu.%6lu\t ret:%d\n", inet_ntoa(ia), profile->sent.tv_sec, profile->sent.tv_usec, ret);
-
       
       free(dst);
     } else {
@@ -79,56 +77,68 @@ void *ping_loop(void *argsin){
 
 
 void *recv_loop(void *argsin){
-  /*
   struct ping_recv_th_args *args = (struct ping_recv_th_args*)argsin;
 
-  int sockfd = args->sockfd;
-
-  struct timespec tm;
-  struct timespec *tm_sent;
-  void *sent_ping;
-  struct target *t;
-  
   char buffer[1024];
+  char sndbuffer[1024];
   int ret;
   struct iphdr *ip = (struct iphdr*)buffer;
-  struct sockaddr_in rec_str;
-  struct in_addr inadr;
+  struct icmphdr *icmp = (struct icmphdr*)(buffer+sizeof(struct iphdr));
 
-  set_sock_opt(sockfd);
+  struct timeval rec_time;
+  
+  struct in_addr inadr;
+  struct target_profile *tp;
+  
+  set_sock_opt(args->sockfd);
+  
   while(args->run){
-    ret = recv(sockfd, buffer, 1024, 0);
-    clock_gettime(CLOCK_MONOTONIC, &tm);
+    ret = recv(args->sockfd, buffer, 1024, 0);
+    gettimeofday(&rec_time, NULL);
     
     if(ret < 0){
       printf("Recv error: %s\n", strerror(errno));
     }
     if(ret >= 0 && ip->protocol == IPPROTO_ICMP){
-      rec_str.sin_addr.s_addr = ip->saddr;
+      struct in_addr printable;
+      printable.s_addr = ip->saddr;
+      
+      u_int16_t id = icmp->un.echo.id;
+      struct ping_profile *profile = avl_search(args->sent_pings, &id, compare, sizeof(u_int16_t));
+      
+      
+      if(profile != NULL && memcmp(&profile->dst, &ip->saddr, sizeof(in_addr_t)) == 0){
+	uint64_t time_sent = profile->sent.tv_sec*(uint64_t)1000000 + profile->sent.tv_usec;
+	uint64_t time_recv = rec_time.tv_sec*(uint64_t)1000000 + rec_time.tv_usec;
 
-      sent_ping = ll_search_node(args->sent_pings, &ip->saddr, sizeof(in_addr_t));
-      if(sent_ping != NULL){
-
-	tm_sent = sent_ping+sizeof(in_addr_t);	
-	snprintf(buffer, 1023, "ping received of size %d from %s in %ldms\n\n", ret, inet_ntoa(rec_str.sin_addr), (tm.tv_nsec - tm_sent->tv_nsec)/1000000);
-	free(sent_ping);
-
-	t = malloc(sizeof(struct target));
-	t->addr = rec_str.sin_addr.s_addr;
-	ll_pq_enqueue(args->ping_queue, t, 0);
-	t = NULL;
+	tp = avl_search(args->targets, &profile->dst, compare, sizeof(in_addr_t));
 	
-	printf("Sending to central server: %s\n", buffer);
-	tls_send(args->conn, buffer, (strlen(buffer) < 1023)? strlen(buffer) : 1023);
+	snprintf(sndbuffer, 1024, "Recv:%s=%lu;\n", inet_ntoa(printable), (time_recv - time_sent)/1000);
+	printf("%s",sndbuffer);
+	tp->pings_out--;
+
+	tls_send(args->conn, sndbuffer, (strlen(buffer) < 1023)? strlen(sndbuffer) : 1023);
 	
-	memset(buffer, 0, 1024);
+      } else if(profile != NULL) {
+         tp = avl_search(args->targets, &profile->dst, compare, sizeof(in_addr_t));
+	if(tp){
+	  printf("Unreach\n");
+	  tp->unreachable = 1;
+	  tp->pings_out--;
+	}
+
+      } else {
+	printf("received undocumented reply\n");
       }
       
-
-    }
+      //tls_send(args->conn, buffer, (strlen(buffer) < 1023)? strlen(buffer) : 1023);
+	
+	
+      }
+      
+    memset(buffer, 0, 1024);
     usleep(1);
   }
-  */
     
 }
 
@@ -140,9 +150,6 @@ void *server_loop(void *argsin){
   char buff[SIZE];
 
   tls_send(args->conn, "hello\n\0\0", 7);
-  
-  
-  printf("%s\n", buff);
 
   in_addr_t *target;
   struct target *t;
@@ -155,35 +162,35 @@ void *server_loop(void *argsin){
     tls_recv(args->conn, buff, SIZE-1);
 
     if(strncmp(buff, "Host:", 5) == 0){
-      printf("Recived Host! %s\n", buff);
       in_addr_t tgt = inet_addr(&buff[5]);
       if(avl_search(args->targets, &tgt, compare, sizeof(in_addr_t)) == NULL){
 	tp = malloc(sizeof(struct target_profile));
+	tp->adr = tgt;
+	tp->unreachable = 0;
+	tp->timeout = 0;
 	tp->pings_out = 0;
 	gettimeofday(&tp->lastping, NULL);
-	avl_insert(args->targets, &tgt, tp, compare, sizeof(in_addr_t));
-	printf("Seconds: %lu\n", tp->lastping.tv_sec);
+	avl_insert(args->targets, &tp->adr, tp, compare, sizeof(in_addr_t));
       }
     }
-
 
   }
 
 }
 
 void queue_viable(void *target, void *profile, void *queue){
-  in_addr_t *tgt = (in_addr_t*)target;
   struct target_profile *tp = (struct target_profile*)profile;
   struct list *q = (struct list*)queue;
 
   struct timeval time;
   gettimeofday(&time, NULL);
 
-
+  in_addr_t *tgt;
   struct in_addr printable;
-  if(tp->pings_out < 3 && (time.tv_sec - tp->lastping.tv_sec) > 30){
+  if(tp->pings_out < 3 && (time.tv_sec - tp->lastping.tv_sec) > ((tp->unreachable || tp->timeout)? 200 : 10)){
+    tgt = malloc(sizeof(in_addr_t));
+    memcpy(tgt, target, sizeof(in_addr_t));
     printable.s_addr = *tgt;
-    printf("Queueing ping for %s\n", inet_ntoa(printable));
     tp->pings_out++;
     gettimeofday(&tp->lastping, NULL);
     ll_pq_enqueue(q, tgt, 0);
@@ -198,7 +205,7 @@ void *queue_loop(void *argsin){
 
   while(args->run){
     avl_apply_to_all(args->targets, queue_viable, args->queue);
-    sleep(5);
+    sleep(2);
   }
 }
 
@@ -240,6 +247,7 @@ int main(){
 
   struct ping_recv_th_args recv_args;
   recv_args.conn = &conn;
+  recv_args.targets = &targets;
   recv_args.sent_pings = &sent_pings;
   recv_args.ping_queue = &ping_queue;
   recv_args.sockfd = sockfd;
