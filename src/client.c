@@ -114,19 +114,27 @@ void *recv_loop(void *argsin){
 	tp = avl_search(args->targets, &profile->dst, compare, sizeof(in_addr_t));
 	
 	snprintf(sndbuffer, 1024, "Recv:%s=%lu;\n", inet_ntoa(printable), (time_recv - time_sent)/1000);
-	printf("%s",sndbuffer);
 	tp->pings_out--;
-
+	tp->timeout = 0;
+	tp->unreachable = 0;
+	
 	tls_send(args->conn, sndbuffer, (strlen(buffer) < 1023)? strlen(sndbuffer) : 1023);
+
+	avl_remove(args->sent_pings, &id, compare, sizeof(int));
+
 	
       } else if(profile != NULL) {
          tp = avl_search(args->targets, &profile->dst, compare, sizeof(in_addr_t));
 	if(tp){
-	  printf("Unreach\n");
+	  printable.s_addr = profile->dst;
+	  snprintf(sndbuffer, 1024, "Recv:%s=%d;\n", inet_ntoa(printable), -2);
+	  tls_send(args->conn, sndbuffer, (strlen(buffer) < 1023)? strlen(sndbuffer) : 1023);
 	  tp->unreachable = 1;
 	  tp->pings_out--;
 	}
 
+	avl_remove(args->sent_pings, &id, compare, sizeof(int));
+	
       } else {
 	printf("received undocumented reply\n");
       }
@@ -142,6 +150,61 @@ void *recv_loop(void *argsin){
     
 }
 
+
+void timeout_func(void *key, void *sent_ping, void *args){
+  char buffer[255];
+  struct timeout_arg *ta = (struct timeout_arg*)args;
+  struct ping_profile *profile = (struct ping_profile*)sent_ping;
+
+  struct timeval rec_time;
+  struct in_addr printable;
+  
+  if(profile){
+    gettimeofday(&rec_time, NULL);
+
+    printable.s_addr = profile->dst;
+
+    snprintf(buffer, 254, "Recv:%s=%d;\n", inet_ntoa(printable), -1);
+    
+
+    if(rec_time.tv_sec -  profile->sent.tv_sec > 10){  
+      in_addr_t adr = profile->dst;
+      struct target_profile *tp = avl_search(ta->targets, &adr, compare, sizeof(in_addr_t));
+      if(tp){
+	tp->timeout = 1;
+	tp->pings_out--;
+      }
+      tls_send(ta->conn,  buffer, strnlen(buffer, 254));
+      ll_pq_enqueue(&ta->timedout, key, 0);
+    }
+    
+    
+  }
+
+}
+
+
+
+void *timeout_loop(void *argsin){
+  struct ping_recv_th_args *args = (struct ping_recv_th_args*)argsin;
+
+  struct timeout_arg ta;
+  ll_initialize(&ta.timedout);
+  ta.conn = args->conn;
+  ta.targets = args->targets;
+  ta.sent_pings = args->sent_pings;
+ 
+  
+  while(*args->run){
+    avl_apply_to_all(args->sent_pings, timeout_func, &ta);
+
+    while(ta.timedout.size > 0){
+      avl_remove(args->sent_pings, ll_pq_dequeue(&ta.timedout), compare, sizeof(int));
+    }
+    sleep(10);
+  }
+  
+}
 
 
 void *server_loop(void *argsin){
@@ -222,7 +285,7 @@ int main(){
   in_addr_t src = get_ip("wlp9s0\0\0", 6, sockfd);
   
 
-  const char *server = "127.0.0.1\0";
+  const char *server = "172.31.45.111\0";
   struct connection conn;
 
 
@@ -268,12 +331,13 @@ int main(){
   qur_args.sockfd = sockfd;
   qur_args.run = &run;
 
-  pthread_t th_recv, th_snd, th_qur, th_srv;
+  pthread_t th_recv, th_snd, th_qur, th_srv, th_tim;
   void **retval;
   pthread_create(&th_recv, NULL, recv_loop, (void*)&recv_args);
   pthread_create(&th_snd, NULL, ping_loop, (void*) &snd_args);  
   pthread_create(&th_srv, NULL, server_loop, (void*)&srv_args);
   pthread_create(&th_qur, NULL, queue_loop, (void*)&qur_args);
+  pthread_create(&th_tim, NULL, timeout_loop, (void*)&recv_args);
 
   pthread_join(th_srv, retval);
   pthread_join(th_qur, retval);

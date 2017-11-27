@@ -31,6 +31,13 @@ struct ping_profile{
   struct timeval sent;
 };
 
+struct  timeout_arg{
+  struct connection *conn;
+  struct tree *targets;
+  struct tree *sent_pings;
+  struct list timedout;
+};
+
 
 struct ping_th_args{
   struct list *queue;
