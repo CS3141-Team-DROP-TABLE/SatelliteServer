@@ -33,6 +33,7 @@ int compare(void *a, void *b, size_t sz){
   return memcmp(a, b, sz);
 }
 
+
 u_int16_t get_unique(){
   static u_int16_t id = 0;
   return id++;
@@ -64,7 +65,7 @@ void *ping_loop(void *argsin){
       profile = malloc(sizeof(struct ping_profile));
       profile->dst = *dst;
       profile->id = id;
-      avl_insert(args->sent_pings, &profile->id, profile, compare, sizeof(u_int16_t));
+      avl_insert(args->sent_pings, &id, profile, compare, sizeof(u_int16_t));
       gettimeofday(&profile->sent, NULL);
 
       int ret = send_ping(packet, *dst, args->sockfd);
@@ -104,13 +105,16 @@ void *recv_loop(void *argsin){
     if(ret < 0){
       printf("Recv error: %s\n", strerror(errno));
     }
+
+    
     if(ret >= 0 && ip->protocol == IPPROTO_ICMP){
       struct in_addr printable;
       printable.s_addr = ip->saddr;
       
       u_int16_t id = icmp->un.echo.id;
       struct ping_profile *profile = avl_search(args->sent_pings, &id, compare, sizeof(u_int16_t));
-      
+
+      printf("Received ping id %d\n", id);
       
       if(profile != NULL && memcmp(&profile->dst, &ip->saddr, sizeof(in_addr_t)) == 0){
 	uint64_t time_sent = profile->sent.tv_sec*(uint64_t)1000000 + profile->sent.tv_usec;
@@ -125,11 +129,16 @@ void *recv_loop(void *argsin){
 	
 	tls_send(args->conn, sndbuffer, (strlen(buffer) < 1023)? strlen(sndbuffer) : 1023);
 
-	avl_remove(args->sent_pings, &id, compare, sizeof(int));
-
+	void * lp = avl_search(args->sent_pings, &id, compare, sizeof(u_int16_t));
+	void * sp = avl_remove(args->sent_pings, &id, compare, sizeof(u_int16_t));
+	free(sp);
+	printf("Ping ID: %d : %p : %p\n", id, lp, sp);
+        
 	
       } else if(profile != NULL) {
-         tp = avl_search(args->targets, &profile->dst, compare, sizeof(in_addr_t));
+	tp = avl_search(args->targets, &profile->dst, compare, sizeof(in_addr_t));
+
+
 	if(tp){
 	  printable.s_addr = profile->dst;
 	  snprintf(sndbuffer, 1024, "Recv:%s=%d;\n", inet_ntoa(printable), -2);
@@ -138,8 +147,13 @@ void *recv_loop(void *argsin){
 	  tp->pings_out--;
 	}
 
-	avl_remove(args->sent_pings, &id, compare, sizeof(int));
+	void *lp = avl_search(args->sent_pings, &id, compare, sizeof(u_int16_t));
+	void *sp = avl_remove(args->sent_pings, &id, compare, sizeof(u_int16_t));
+        free(sp);
+	printf("Ping ID: %d : %p : %p \n", id, lp, sp);
 	
+
+
       } else {
 	printf("received undocumented reply\n");
       }
@@ -179,6 +193,7 @@ void timeout_func(void *key, void *sent_ping, void *args){
 	tp->timeout = 1;
 	tp->pings_out--;
       }
+      printf("Timeout, %s, %p\n", buffer, tp);
       tls_send(ta->conn,  buffer, strnlen(buffer, 254));
       ll_pq_enqueue(&ta->timedout, key, 0);
     }
@@ -205,6 +220,7 @@ void *timeout_loop(void *argsin){
 
     while(ta.timedout.size > 0){
       void *rem = ll_pq_dequeue(&ta.timedout);
+      printf("id %d\n", *(int*)rem);
       if(rem && avl_search(args->sent_pings, rem, compare, sizeof(int)))
 	avl_remove(args->sent_pings, rem, compare, sizeof(int));
     }
