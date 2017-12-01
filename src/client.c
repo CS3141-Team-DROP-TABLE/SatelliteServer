@@ -204,7 +204,9 @@ void *timeout_loop(void *argsin){
     avl_apply_to_all(args->sent_pings, timeout_func, &ta);
 
     while(ta.timedout.size > 0){
-      avl_remove(args->sent_pings, ll_pq_dequeue(&ta.timedout), compare, sizeof(int));
+      void *rem = ll_pq_dequeue(&ta.timedout);
+      if(rem && avl_search(args->sent_pings, rem, compare, sizeof(int)))
+	avl_remove(args->sent_pings, rem, compare, sizeof(int));
     }
     sleep(10);
   }
@@ -224,6 +226,8 @@ void *server_loop(void *argsin){
   struct sockaddr_in tg;
 
   struct target_profile *tp;
+
+  struct in_addr printable;
   
   while(*(args->run)){
     memset(buff, 0, SIZE);
@@ -239,6 +243,9 @@ void *server_loop(void *argsin){
 	tp->pings_out = 0;
 	gettimeofday(&tp->lastping, NULL);
 	avl_insert(args->targets, &tp->adr, tp, compare, sizeof(in_addr_t));
+	printable.s_addr = tgt;
+	printf("Received Target: %s\n", inet_ntoa(printable));
+	
       }
     }
 
