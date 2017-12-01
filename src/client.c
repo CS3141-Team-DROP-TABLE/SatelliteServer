@@ -39,6 +39,11 @@ u_int16_t get_unique(){
 }
 
 
+void usage(){
+  printf("Usage:\n client <Central Server IP>\n");
+
+}
+
 void *ping_loop(void *argsin){ 
   struct ping_th_args *args = (struct ping_th_args*)argsin;
 
@@ -272,7 +277,7 @@ void *queue_loop(void *argsin){
   }
 }
 
-int main(){
+int main(int argc, char **argv){
 
   struct list ping_queue;
   ll_initialize(&ping_queue);
@@ -285,13 +290,18 @@ int main(){
   in_addr_t src = get_ip("wlp9s0\0\0", 6, sockfd);
   
 
-  const char *server = "172.31.45.111\0";
+  if(argc != 2){
+    usage();
+    exit(1);
+  }
+  
+  const char *server = "127.0.0.1\0";
   struct connection conn;
 
 
   conn.port = 5556;
-  conn.server = (char*)malloc(sizeof(char)*strlen(server));
-  memcpy(conn.server, server, strlen(server));
+  conn.server = (char*)malloc(sizeof(char)*strlen(argv[1]));
+  memcpy(conn.server, argv[1], strlen(argv[1]));
  
   open_tcp(&conn);
 
